@@ -1,171 +1,148 @@
-import telebot
 import fake_useragent
 import requests
-import bs4
+from selenium import webdriver
+import telebot
 from telebot import types
-from fake_useragent import UserAgent
-import sqlite3
+from bs4 import BeautifulSoup
+from settings import tokken
+from db_bot import data_base_bot
 import time
-from requests.exceptions import ConnectionError
-from urllib3.exceptions import ProtocolError
-from conf import tokken, headers, api_id, api_hash
-
-bot = telebot.TeleBot(tokken, True, 4)
-bot.config = {'requests_kwargs': {'timeout': 60}, 'api_key': None}
-bot.config['api_key'] = tokken
-
-"|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-"|                                                           |"
-"|                                                           |"
-"|                        OOOOO                              |"
-"|                      OO     OO                            |"
-"|                      OO                                   |"
-"|                      OO                                   |"
-"|                      OO                                   |"
-"|                      OO     OO                            |"
-"|                        OOOOO                              |"
-"|                                                           |"
-"|                                                           |"
-"|              bot by CATROVACER beta-1.2v                  |"
-"|____________________________________________________________"
-
-try:
-    @bot.message_handler(commands=["start", "help", "auto", "viev"])
-    def command_message(message):
-        if str(message.text) == '/start':
-            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            key1 = types.KeyboardButton("🔍 - Пробить авто")
-            key2 = types.KeyboardButton("ℹ️- Инфо о боте")
-            key3 = types.KeyboardButton("🆘 - Помощь")
-            key4 = types.KeyboardButton("☕️Розвитие проекта")
-
-            markup.add(key1, key2, key3, key4)
-            if str(message.chat.first_name) != None:
-                x = "Привет"
-                bot.send_message(message.chat.id, x + " " + message.chat.first_name + " "
-                                                                                      "/help - тебе поможет"
-                                 , parse_mode='Markdown', reply_markup=markup)
-            else:
-                bot.send_message(message.chat.id, "Привет Аноним", parse_mode='Markdown')
-        if str(message.text) == '/help':
-            bot.send_message(message.chat.id, "Вот список команд", parse_mode='Markdown')
-            x = list_command(message)
-            return bot.send_message(message.chat.id, x, parse_mode='Markdown')
-
-        if str(message.text) == "/auto":
-            reply = types.InlineKeyboardMarkup()
-            yes = types.InlineKeyboardButton(text="Да", callback_data="yes")
-            no = types.InlineKeyboardButton(text="Нет", callback_data="no")
-            reply.add(yes, no)
-
-            bot.send_message(message.chat.id, "Хотите узнать информацию об автомобиле?", reply_markup=reply,
-                             parse_mode='Markdown')
+#from payments import Payments
 
 
-    @bot.callback_query_handler(func=lambda call: True)
-    def call_lambda(call):
-        if call.data == 'yes':
-            msg = bot.send_message(call.message.chat.id, "введите номер автомобиля, (AX6534BI)", parse_mode='Markdown')
-            bot.register_next_step_handler(msg, cars_info)
-        else:
-            bot.send_message(call.message.chat.id, "Очень жаль", parse_mode='Markdown')
+class Request(object):
+    headers = {"user-agent": fake_useragent.UserAgent().data_browsers["chrome"][0]}
+
+    def request_from(self):
+        url = f"https://baza-gai.com.ua/nomer/{self.number}"
+        result = requests.get(url, headers=self.headers)
+        if result.status_code == 200:
+            with open('index.html', 'w', encoding='utf-8') as file:
+                file.write(result.text)
+
+            soup = BeautifulSoup(result.text, "lxml")
+            try:
+                vin = soup.find('span', id='vin-code-erased').get('data-full')
+
+            except Exception as _ex:
+                vin = 'Vin код не указан'
+            vin = "VIN : " + vin
+            all_info = soup.find("tbody").find_all("td")
+            date = f"ДАТА РЕГИСТРАЦИИ : {str(all_info[0].text).strip()}"
+            mark = ' '.join(str(all_info[1].text).split())
+            mark = 'МАРКА : ' + mark
+            dvig = str(all_info[2].text)
+            dvig = "ЦВЕТ И ОБЬЕМ : " + dvig
+            info = ' '.join(str(all_info[3].text).split())
+            info = 'ОПИСАНИЕ : ' + info
+            user_info = all_info[4].text
+            user_info = "ИНФОРМАЦИЯ : " + user_info
+            stolen = str(soup.find('div', class_='stolen-info').text).strip()
+            stolen = "ОБ УГОНЕ : " + stolen
+            photo = soup.find('div', class_='text-center mt-3 mx-auto').find('img').get('src')
+            imge_url = 'https://baza-gai.com.ua' + photo
+            result_image = requests.get(imge_url, headers=self.headers).content
+            with open('1.jpg', "wb") as file:
+                file.write(result_image)
+            return mark, date, vin, dvig, info, user_info, stolen
 
 
-    @bot.message_handler(content_types=["text"])
-    def incomming_message(message):
-        if message.chat.type == "private":
-            if str(message.text) == "🔍 - Пробить авто":
-                msg = bot.send_message(message.chat.id, "Введите номер авто в формате: АА5425ВІ", parse_mode='Markdown')
-                bot.register_next_step_handler(msg, cars_info)
-                # print(message.text)
-            elif str(message.text) == "ℹ️- Инфо о боте":
-                msg = bot.send_message(message.chat.id, "Информация о боте", parse_mode='Markdown')
-                bot.register_next_step_handler(msg, bot_info(message))
-            else:
-                bot.send_message(message.chat.id, "Введите правильный номер", parse_mode='Markdown')
+client = telebot.TeleBot(tokken)
+
+command_list = ['/start - начало роботы', '/info - информация о боте', '/auto - найти автомобиль', '/abouth - о нас']
 
 
-    # bot.polling(none_stop=True)
+@client.message_handler(commands=['start', 'info', 'auto', 'abouth'])
+def tele_commands(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key1 = types.KeyboardButton("🔍 - Пробить авто")
+    key2 = types.KeyboardButton("ℹ️- Инфо о боте")
+    key3 = types.KeyboardButton("🆘 - Помощь")
+    #key4 = types.KeyboardButton("☕️Розвитие проекта")
 
-    def list_command(message):
-        commands = ["/start - начало роботы", "/help - помощь", "/viev - информацыя о боте",
-                    "/auto - информацыя об авто"]
-        x_commands = "\n".join(commands)
-        return x_commands
-
-
-    def bot_info(message):
-        return bot.send_message(message.chat.id, "Наш бот берет всю информацию из сайта 'baza-gai.com.ua/' "
-                                          "если автомобиль есть в базе то он его найдет и выдаст полную "
-                                          "информацию о нем!\n"
-                                          "если Вы хотите помочь развитию проекта, нажмите на кнопку Развитие проекта",
-                                parse_mode='Markdown')
-
-
-    def cars_info(message):
+    markup.add(key1, key2, key3)
+    if message.text == '/start'.lower():
         try:
-            x = list(str(message.text).upper().split(" "))
-            number = "".join(x)
-            print(number)
-            bot.send_message(message.chat.id, f"Вы ввели {number} сейчас мы найдем необходимую информацию",
-                             parse_mode='Markdown')
-            # создаем переменную для поиска в Базе ГАИ
-            search = f"search?digits={number}"
-            rec_url = "https://baza-gai.com.ua/" + search
-            # посылаем запрос и получаем ответ сохраняем все в переменную res
-            res = requests.get(rec_url, headers=headers).text
-            # создаем обьект супа для парсинга
-            soup = bs4.BeautifulSoup(res, "lxml")
-            # находим необходимые данные (марка автомобиля)
-            mark = soup.find("h1", class_="text-center mb-3").text
-            mark_auto = mark.strip().split()  # создаем список из названия автомобиля
-            mark_auto = ' '.join(mark_auto).strip()  # конкатенируем его в одну строку для удобства
-            # находим необходимый список и забираем из него данные про угон сохраняем в переменную ugon
-            oll_div = soup.find("div", class_="d-md-none").find_all("div")
-            # так же аполучаем номер автомобиля
-            num_auto = str(soup.find("div", class_="plate__text").text).strip()
-            # переменная с информацыей об угоне
-            ugon = str(oll_div[4].text).strip()
-            # получаем город розположения автомобиля город регистрации
-            city = str(oll_div[3].text).strip()
-            operations = str(oll_div[2].text).strip()
-            # формируем необходимую строку и сохраняем ее в переменную mess
-            if "Не числится" in str(ugon):
-                mess = "🚘 - " + str(mark_auto) + "\n" + "#️⃣ - " + str(num_auto).strip() + "\n" + "✅ - " + str(
-                    ugon) + "\n" + "🌆 - " + str(city) + "\n" + "📝 - " + str(operations)
-                rep = types.InlineKeyboardMarkup()
-                yes = types.InlineKeyboardButton(text="Да", callback_data="yes")
-                no = types.InlineKeyboardButton(text="Нет", callback_data="no")
-                rep.add(yes, no)
-                return bot.send_message(message.chat.id, f"вот что мы нашли по номеру {number} \n\n {mess} \n\n"
-                                                         f"хотите узнать еще один автомобиль?", reply_markup=rep,
-                                        parse_mode='Markdown')
-            else:
-                mess = "🚘 - " + str(mark_auto) + "\n" + "#️⃣ - " + str(num_auto).strip() + "\n" + "❌ - " + str(
-                    ugon) + "\n" + "🌆 - " + str(city) + "\n" + "📝 - " + str(operations)
-                return bot.send_message(message.chat.id, f"вот что мы нашли по номеру {number} \n {mess}",
-                                        parse_mode='Markdown')
-        except IndexError as index:
-            print(index)
-            rep = types.InlineKeyboardMarkup()
-            yes = types.InlineKeyboardButton(text="Да", callback_data="yes")
-            no = types.InlineKeyboardButton(text="Нет", callback_data="no")
-            rep.add(yes, no)
-            return bot.send_message(message.chat.id, "НЕ найдено, попробуйте еще",
-                                    parse_mode='Markdown', reply_markup=rep)
-        except AttributeError as atr:
-            print(atr)
-            rep = types.InlineKeyboardMarkup()
-            yes = types.InlineKeyboardButton(text="Да", callback_data="yes")
-            no = types.InlineKeyboardButton(text="Нет", callback_data="no")
-            rep.add(yes, no)
-            return bot.send_message(message.chat.id,
-                                    f"НЕ найдено совпадений по номеру {number}, попробовать еще",
-                                    parse_mode='Markdown', reply_markup=rep)
+            username = message.json['from']['first_name']
+            mess = f"Привет {username}! \nэтот бот ищет информацию об авто в Украине 🇺🇦" \
+                   f"для получения списка комманд 👉 /info 👈"
+            # print(username)
+        except Exception as use:
+            username = "Username"
+        client.send_message(message.chat.id, mess, reply_markup=markup)
+    elif message.text == '/info'.lower():
+        x = 'Бот находится в тестовом режиме 🛠\n'
+        mess = f'{x}Список доступных команд\n' + '\n'.join(command_list)
+        client.send_message(message.chat.id, mess)
+    elif message.text == '/auto'.lower():
+        msg = client.send_message(message.chat.id, "введите номер автомобиля, (AX6534BI)")
+        client.register_next_step_handler(msg, cars_info)
+    elif message.text == '/abouth'.lower():
+        mess = """
+        Привет друг,\n Мы молодая команда создающая полезные вещи для людей!\nВся информация взята с базы данных ГАИ
+и актуальна начегоднешний день!\nБлагодарим за пользование нашими услугами.
+        """
+        client.send_message(message.chat.id, str(mess).strip())
 
-except requests.exceptions.ConnectionError as conn:
-    print(conn)
-except TypeError as typemessage:
-    print(typemessage)
-if __name__ == "__main__":
-    bot.infinity_polling()
+
+@client.callback_query_handler(func=lambda call: True)
+def call_lambda(call):
+    if call.data == 'yes':
+        msg = client.send_message(call.message.chat.id, "введите номер автомобиля, (AX6534BI)", parse_mode='Markdown')
+        client.register_next_step_handler(msg, cars_info)
+    else:
+        client.send_message(call.message.chat.id, "Очень жаль", parse_mode='Markdown')
+
+
+@client.message_handler(content_types=['text'])
+def mess_from_user(message):
+    if message.text == "🔍 - Пробить авто":
+        msg = client.send_message(message.chat.id, 'Введите номер автомобиля в формате (АА6565BI)')
+        client.register_next_step_handler(msg, cars_info)
+    elif message.text == "ℹ️- Инфо о боте":
+        x = 'Бот находится в тестовом режиме 🛠\n'
+        mess = f'{x}Список доступных команд\n' + '\n'.join(command_list)
+        client.send_message(message.chat.id, mess)
+    elif message.text == "🆘 - Помощь":
+        mess = """
+Привет друг,\n этот бот может найти информацию об автомобиле в Украине!
+для этого необходимо отправить команду /auto и ввести номер автомобиля.
+Вся информация взята с базы данных ГАИ
+и актуальна на сегоднешний день!
+                """
+        client.send_message(message.chat.id, str(mess).strip())
+    #elif message.text == "☕️Розвитие проекта":
+    #    client.send_message(message.chat.id, f"платежная система пока в розработке\n"
+    #                                         f"но при желании можете перевести на карту\n"
+    #                                         f"(Приват банк)")
+    #    client.send_message(message.chat.id, "4149 6293 1594 0247")
+        #Payments.user_pay(self=Payments,client=client, chat_id=message.chat.id)
+
+
+def cars_info(message):
+    data_base_bot(message)
+    try:
+        print(message.text)
+        # ниже привденный код робочий
+        Request.number = str(message.text).upper()
+        req = Request.request_from(self=Request)
+        mess = '\n'.join(req)
+        rep = types.InlineKeyboardMarkup()
+        yes = types.InlineKeyboardButton(text="Да", callback_data="yes")
+        no = types.InlineKeyboardButton(text="Нет", callback_data="no")
+        rep.add(yes, no)
+        client.send_message(message.chat.id, mess)
+        client.send_message(message.chat.id, "Фото взято с базы ГАИ цвет на фото может не соответствовать указанному")
+        client.send_photo(message.chat.id, photo=open('1.jpg', 'rb'))
+        client.send_message(message.chat.id, "Хотите пробить еще автомобиль", reply_markup=rep)
+    except Exception as _ex:
+        client.send_message(message.chat.id, f'Вы ввели номер {str(message.text).upper()} '
+                                             f'проверте правельность ввода номера')
+
+
+def main():
+    client.polling(non_stop=True)
+
+
+if __name__ == '__main__':
+    main()
