@@ -58,7 +58,6 @@ def tele_commands(message):
     key1 = types.KeyboardButton("🔍 - Пробить авто")
     key2 = types.KeyboardButton("ℹ️- Инфо о боте")
     key3 = types.KeyboardButton("🆘 - Помощь")
-    #key4 = types.KeyboardButton("☕️Розвитие проекта")
 
     markup.add(key1, key2, key3)
     if message.text == '/start'.lower():
@@ -111,12 +110,6 @@ def mess_from_user(message):
 и актуальна на сегоднешний день!
                 """
         client.send_message(message.chat.id, str(mess).strip())
-    #elif message.text == "☕️Розвитие проекта":
-    #    client.send_message(message.chat.id, f"платежная система пока в розработке\n"
-    #                                         f"но при желании можете перевести на карту\n"
-    #                                         f"(Приват банк)")
-    #    client.send_message(message.chat.id, "4149 6293 1594 0247")
-        #Payments.user_pay(self=Payments,client=client, chat_id=message.chat.id)
 
 
 def cars_info(message):
